@@ -9,8 +9,8 @@ const char* ssid = WIFI_SSID;
 const char* password = WIFI_PASS;
 const char* hostname = "esp32-pxmatrix";
 
-// Data timeout in seconds
-#define DATA_TIMEOUT 2
+// Data timeout in ms
+#define DATA_TIMEOUT 5000
 
 // UDP port for TPM2.NET protocol
 #define PORT 65506
@@ -49,7 +49,7 @@ enum displayState {
 displayState state = DISPLAY_STATE_OFFLINE;
 displayState lastState = DISPLAY_STATE_OFFLINE;
 
-int lastPacketTime = 0xFFFFFFFF;
+unsigned long lastPacketTime;
 
 // Symbols
 
@@ -163,7 +163,7 @@ void updateMatrix(uint8_t* data, int size, int packetNumber, int pixelCount) {
 void loop() {
   int packetSize = udp.parsePacket();
   if (packetSize > 0) {
-    lastPacketTime = millis() / 1000;
+    lastPacketTime = millis();
   }
   if (state == DISPLAY_STATE_ACTIVE) {
     if (packetSize > 0) {
@@ -189,7 +189,7 @@ void loop() {
       displayInformation();
     }
   }
-  if (millis() / 1000 - lastPacketTime > DATA_TIMEOUT && state == DISPLAY_STATE_ACTIVE) {
+  if (millis() - lastPacketTime > DATA_TIMEOUT && state == DISPLAY_STATE_ACTIVE) {
     state = DISPLAY_STATE_TIMEOUT;
   }
   if (state != lastState) {
