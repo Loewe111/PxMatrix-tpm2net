@@ -9,7 +9,6 @@ const char* password = WIFI_PASS;
 
 // UDP port for TPM2.NET protocol
 #define PORT 65506
-#define BUFFER_SIZE 768 // Multiple of 3, recommended: 768
 
 // LED matrix configuration
 #define FRAME_RATE 512
@@ -34,6 +33,8 @@ hw_timer_t * timer = NULL;
 
 const uint16_t BLACK = display.color565(0, 0, 0);
 const uint16_t WHITE = display.color565(255, 255, 255);
+
+int bufferSize = 0;
 
 void IRAM_ATTR display_updater() {
   display.display();
@@ -65,7 +66,7 @@ void setup() {
   display.print(WiFi.localIP().toString());
   display.showBuffer();
 
-  // Start UDP server for SACN131 protocol
+  // Start UDP server for TPM2.net protocol
   if (!udp.begin(PORT)) {
     Serial.println("Failed to start UDP server");
     while (1) {
@@ -83,8 +84,7 @@ void setup() {
   timerAlarmEnable(timer);
 }
 
-void updateMatrix(uint8_t* data, int size, int packetNumber) {
-  const int pixelCount = size / 3;
+void updateMatrix(uint8_t* data, int size, int packetNumber, int pixelCount) {
   const int offset = size * (packetNumber - 1) / 3;
   int x, y;
   uint8_t r, g, b;
@@ -105,13 +105,8 @@ void updateMatrix(uint8_t* data, int size, int packetNumber) {
 void loop() {
   int packetSize = udp.parsePacket();
   if (packetSize > 0) {
-    #ifdef BUFFER_SIZE
-      uint8_t packetBuffer[BUFFER_SIZE + 7];
-      udp.readBytes(packetBuffer, BUFFER_SIZE + 7);
-    #else
-      uint8_t packetBuffer[packetSize];
-      udp.readBytes(packetBuffer, packetSize);
-    #endif
+    uint8_t packetBuffer[packetSize];
+    udp.readBytes(packetBuffer, packetSize);
 
     if (packetBuffer[0] != 0x9C || packetBuffer[1] != 0xDA) {
       return;
@@ -119,7 +114,10 @@ void loop() {
 
     int frameSize = packetBuffer[2] << 8 | packetBuffer[3];
     int packetNumber = packetBuffer[4];
+    
+    bufferSize = max(frameSize, bufferSize);
 
-    updateMatrix(packetBuffer, frameSize, packetNumber);
+    const int pixelCount = frameSize / 3;
+    updateMatrix(packetBuffer, bufferSize, packetNumber, pixelCount);
   }
 }
