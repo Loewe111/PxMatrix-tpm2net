@@ -2,10 +2,15 @@
 #include <WiFi.h>
 #include <WiFiUdp.h>
 #include <PxMatrix.h>
+#include <Fonts/TomThumb.h>
 
 // Replace with your network credentials as defined in platformio.ini
 const char* ssid = WIFI_SSID;
 const char* password = WIFI_PASS;
+const char* hostname = "esp32-pxmatrix";
+
+// Data timeout in seconds
+#define DATA_TIMEOUT 2
 
 // UDP port for TPM2.NET protocol
 #define PORT 65506
@@ -34,10 +39,61 @@ hw_timer_t * timer = NULL;
 const uint16_t BLACK = display.color565(0, 0, 0);
 const uint16_t WHITE = display.color565(255, 255, 255);
 
+enum displayState {
+  DISPLAY_STATE_OFFLINE,
+  DISPLAY_STATE_ONLINE,
+  DISPLAY_STATE_ACTIVE,
+  DISPLAY_STATE_TIMEOUT
+};
+
+displayState state = DISPLAY_STATE_OFFLINE;
+displayState lastState = DISPLAY_STATE_OFFLINE;
+
+int lastPacketTime = 0xFFFFFFFF;
+
+// Symbols
+
+// 'data', 8x8px
+// 'data', 8x8px
+const unsigned char symbol_data [] PROGMEM = {
+	0x00, 0x02, 0x0a, 0x2a, 0xaa, 0xaa, 0x00, 0x00
+};
+// 'wifi', 8x8px
+const unsigned char symbol_wifi [] PROGMEM = {
+	0x00, 0x7c, 0x82, 0x38, 0x44, 0x10, 0x00, 0x00
+};
+// 'id', 8x8px
+const unsigned char symbol_id [] PROGMEM = {
+	0x00, 0x00, 0x58, 0x54, 0x54, 0x58, 0x00, 0x00
+};
+
 int bufferSize = 0;
 
 void IRAM_ATTR display_updater() {
   display.display();
+}
+
+void displayInformation() {
+  display.setTextWrap(false);
+  display.drawBitmap(1, 0, symbol_wifi, 8, 8, WHITE);
+  display.setCursor(10, 6);
+  display.println(ssid);
+  display.setCursor(10, 14);
+  display.print(WiFi.localIP().toString());
+  display.drawBitmap(1, 16, symbol_id, 8, 8, WHITE);
+  display.setCursor(10, 22);
+  display.print(WiFi.getHostname());
+  display.drawBitmap(1, 24, symbol_data, 8, 8, WHITE);
+  display.setCursor(10, 30);
+  if (state == DISPLAY_STATE_TIMEOUT) {
+    display.print("Timeout");
+  } else if (state == DISPLAY_STATE_ONLINE) {
+    display.print("-");
+  } else if (state == DISPLAY_STATE_ACTIVE) {
+    display.print(String(bufferSize)+" B/P");
+  }
+
+  display.showBuffer();
 }
 
 void setup() {
@@ -48,23 +104,25 @@ void setup() {
   display.setTextWrap(true);
   display.fillScreen(BLACK);
   display.setTextColor(WHITE);
+  display.setFont(&TomThumb);
 
   // Connect to Wi-Fi network
   Serial.print("Connecting to ");
   Serial.print(ssid);
+  WiFi.setHostname(hostname);
   WiFi.begin(ssid, password);
   while (WiFi.status() != WL_CONNECTED) {
     Serial.print(".");
     delay(200);
   }
+  state = DISPLAY_STATE_ONLINE;
 
   Serial.println(" Connected!");
   Serial.print("IP address: ");
   Serial.println(WiFi.localIP());
+
   display.fillScreen(BLACK);
-  display.setCursor(1, 1);
-  display.print(WiFi.localIP().toString());
-  display.showBuffer();
+  displayInformation();
 
   // Start UDP server for TPM2.net protocol
   if (!udp.begin(PORT)) {
@@ -105,19 +163,38 @@ void updateMatrix(uint8_t* data, int size, int packetNumber, int pixelCount) {
 void loop() {
   int packetSize = udp.parsePacket();
   if (packetSize > 0) {
-    uint8_t packetBuffer[packetSize];
-    udp.readBytes(packetBuffer, packetSize);
-
-    if (packetBuffer[0] != 0x9C || packetBuffer[1] != 0xDA) {
-      return;
-    }
-
-    int frameSize = packetBuffer[2] << 8 | packetBuffer[3];
-    int packetNumber = packetBuffer[4];
-    
-    bufferSize = max(frameSize, bufferSize);
-
-    const int pixelCount = frameSize / 3;
-    updateMatrix(packetBuffer, bufferSize, packetNumber, pixelCount);
+    lastPacketTime = millis() / 1000;
   }
+  if (state == DISPLAY_STATE_ACTIVE) {
+    if (packetSize > 0) {
+      uint8_t packetBuffer[packetSize];
+      udp.readBytes(packetBuffer, packetSize);
+
+      if (packetBuffer[0] != 0x9C || packetBuffer[1] != 0xDA) {
+        return;
+      }
+
+      int frameSize = packetBuffer[2] << 8 | packetBuffer[3];
+      int packetNumber = packetBuffer[4];
+      
+      bufferSize = max(frameSize, bufferSize);
+
+      const int pixelCount = frameSize / 3;
+      updateMatrix(packetBuffer, bufferSize, packetNumber, pixelCount);
+    }
+  } else if (state == DISPLAY_STATE_TIMEOUT || state == DISPLAY_STATE_ONLINE) {
+    if (packetSize > 0) {
+      state = DISPLAY_STATE_ACTIVE;
+    } else {
+      displayInformation();
+    }
+  }
+  if (millis() / 1000 - lastPacketTime > DATA_TIMEOUT && state == DISPLAY_STATE_ACTIVE) {
+    state = DISPLAY_STATE_TIMEOUT;
+  }
+  if (state != lastState) {
+    display.fillScreen(BLACK);
+    lastState = state;
+  }
+  udp.flush();
 }
