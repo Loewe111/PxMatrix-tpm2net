@@ -11,6 +11,7 @@ const char* hostname = "esp32-pxmatrix";
 
 // Data timeout in ms
 #define DATA_TIMEOUT 5000
+#define TIMEOUT_MODE 2 // 0: Black Screen, 1: Connection info, 2: Timeout icon
 
 // UDP port for TPM2.NET protocol
 #define PORT 65506
@@ -96,6 +97,12 @@ void displayInformation() {
   display.showBuffer();
 }
 
+void displayTimeout() {
+  display.setTextWrap(false);
+  display.drawBitmap(1, 1, symbol_wifi, 8, 8, WHITE);
+  display.showBuffer();
+}
+
 void setup() {
   Serial.begin(115200); // Debug output
   Serial.println("PxMatrix TPM2.NET Receiver"); // Identify program
@@ -159,7 +166,6 @@ void updateMatrix(uint8_t* data, int size, int packetNumber, int pixelCount) {
   }
 }
 
-
 void loop() {
   int packetSize = udp.parsePacket();
   if (packetSize > 0) {
@@ -182,11 +188,17 @@ void loop() {
       const int pixelCount = frameSize / 3;
       updateMatrix(packetBuffer, bufferSize, packetNumber, pixelCount);
     }
-  } else if (state == DISPLAY_STATE_TIMEOUT || state == DISPLAY_STATE_ONLINE) {
+  } else if (state == DISPLAY_STATE_ONLINE || state == DISPLAY_STATE_OFFLINE || state == DISPLAY_STATE_TIMEOUT) {
     if (packetSize > 0) {
       state = DISPLAY_STATE_ACTIVE;
     } else {
-      displayInformation();
+      if (state == DISPLAY_STATE_TIMEOUT && TIMEOUT_MODE == 2) {
+        displayTimeout();
+      } else if (state == DISPLAY_STATE_TIMEOUT && TIMEOUT_MODE == 1) {
+        displayInformation();
+      } else if (state == DISPLAY_STATE_ONLINE || state == DISPLAY_STATE_OFFLINE) {
+        displayInformation();
+      }
     }
     udp.flush();
   }
