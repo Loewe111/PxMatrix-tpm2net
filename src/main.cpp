@@ -103,6 +103,18 @@ void displayTimeout() {
   display.showBuffer();
 }
 
+bool checkPacket(int packetSize) {
+  if (packetSize < 6) {
+    return false;
+  }
+  uint8_t packetBuffer[packetSize];
+  udp.readBytes(packetBuffer, packetSize);
+  if (packetBuffer[0] != 0x9C || packetBuffer[1] != 0xDA) {
+    return false;
+  }
+  return true;
+}
+
 void setup() {
   Serial.begin(115200); // Debug output
   Serial.println("PxMatrix TPM2.NET Receiver"); // Identify program
@@ -189,7 +201,7 @@ void loop() {
       updateMatrix(packetBuffer, bufferSize, packetNumber, pixelCount);
     }
   } else if (state == DISPLAY_STATE_ONLINE || state == DISPLAY_STATE_OFFLINE || state == DISPLAY_STATE_TIMEOUT) {
-    if (packetSize > 0) {
+    if (checkPacket(packetSize)) {
       state = DISPLAY_STATE_ACTIVE;
     } else {
       if (state == DISPLAY_STATE_TIMEOUT && TIMEOUT_MODE == 2) {
