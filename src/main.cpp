@@ -188,13 +188,13 @@ void loop() {
     } else {
       displayInformation();
     }
+    udp.flush();
   }
-  if (millis() - lastPacketTime > DATA_TIMEOUT && state == DISPLAY_STATE_ACTIVE) {
+  if (state == DISPLAY_STATE_ACTIVE && millis() - lastPacketTime > DATA_TIMEOUT) {
     state = DISPLAY_STATE_TIMEOUT;
   }
   if (state != lastState) {
     display.fillScreen(BLACK);
     lastState = state;
   }
-  udp.flush();
 }
